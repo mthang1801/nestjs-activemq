@@ -1,41 +1,59 @@
-import { QUEUE_DESTINATION, TOPIC_DESTINATION } from '@app/activemq';
-import { ActiveMQPubSubClient } from '@app/activemq/activemq-client';
+import { QUEUE_DESTINATION } from '@app/activemq';
+import { ActiveMQClient } from '@app/activemq/clients/activemq-client';
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Timeout } from '@nestjs/schedule';
+import { Order } from './entity/order.entity';
 
 @Injectable()
 export class OrdersService {
-  private readonly logger = new Logger(OrdersService.name);
-  private queue: ActiveMQPubSubClient | null = null;
+	private readonly logger = new Logger(OrdersService.name);
+	private queue: ActiveMQClient | null = null;
 
-  constructor() {
-    this.queue = new ActiveMQPubSubClient();
-  }
+	constructor(private readonly configService: ConfigService) {
+		this.queue = new ActiveMQClient(configService);
+	}
 
-  @Timeout(Date.now().toString(), 500)
-  getHello(): string {
-    this.logger.log('Publish message');    
+	@Timeout(Date.now().toString(), 500)
+	getHello(): string {
+		this.logger.log('Publish message');
+		const order: Order = {
+			orderDate: new Date(),
+			customerId: 1,
+			customerName: 'Alan',
+			customerPhone: '0123456789',
+			id: 5
+		};
+		// this.queue.publish({ pattern: QUEUE_DESTINATION.FRONTEND_DESTINATION, data: order });
+		// 	.subscribe(() => console.log('pke'));
 
-    // this.queue.send(QUEUE_DESTINATION.FRONTEND_DESTINATION, {
-    //   event: `message ${Date.now()}`,
-    //   data: 'hello frontend',
-    //   type: 'queue',
-    // }).subscribe(() => console.log("pke"));
+		this.queue.publish({
+			pattern: QUEUE_DESTINATION.BACKEND_DESTINATION,
+			data: {
+				event: `message ${Date.now()}`,
+				data: 'hello backend',
+				type: 'queue'
+			}
+		});
 
-    // this.queue.send(QUEUE_DESTINATION.BACKEND_DESTINATION, {
-    //   event: `message ${Date.now()}`,
-    //   data: 'hello backend',
-    //   type: 'queue',
-    // }).subscribe(() => console.log("pke"));
+		// this.queue.publish({
+		// 	pattern: TOPIC_DESTINATION.DEVELOPER,
+		// 	data: {
+		// 		event: `message ${Date.now()}`,
+		// 		data: 'hello',
+		// 		type: 'topic'
+		// 	}
+		// });
 
-    // this.queue.send(QUEUE_DESTINATION.CONSUMER_HELLO_WORLD, {
-    //   event: `message ${Date.now()}`,
-    //   data: 'hello',
-    //   type: 'queue',
-    // });
+		return 'Hello World!';
+	}
 
-    return 'Hello World!';
-  }
+	handleMessage(payload: any) {
+		console.log(payload);
+	}
 
-  handleMessage(payload: any){}
+	handleTopicAMessage(payload) {
+		console.log(payload);
+		// this.queue.ack(payload.message);
+	}
 }
