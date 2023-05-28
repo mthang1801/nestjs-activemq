@@ -4,19 +4,30 @@ import { CustomTransportStrategy, Server, Transport } from '@nestjs/microservice
 import * as stompit from 'stompit';
 import { ActiveMQBase } from '../base/activemq-base';
 import { ActiveMQClient } from '../clients/activemq-client';
+import {
+  CONNECT_EVENT,
+  CONNECT_FAILED_ACTIVEMQ_MESSAGE,
+  CONNECT_FAILED_EVENT,
+  DISCONNECTED_ACTIVEMQ_MESSAGE,
+  DISCONNECT_EVENT,
+  ERROR_ACTIVEMQ_MESSAGE,
+  ERROR_EVENT
+} from '../constants/constants';
 import { QUEUE_PATTERN } from '../patterns/queue.pattern';
 import { ConfigOptions } from '../types/config-options';
 
 export class ActiveMQServer extends Server implements CustomTransportStrategy {
+	protected readonly logger = new Logger(ActiveMQBase.name);
+	server: stompit.Client | null = null;
 	channel: stompit.Channel | null = null;
 	manager: stompit.ConnectFailover = null;
 	activeMQBase: ActiveMQBase | null = null;
 	queuePatternArr: Array<string> = Object.values(QUEUE_PATTERN);
 	heartBeatInvertal = null;
 	configOptions: ConfigOptions;
-	private Nack = false; // Allow Negative Acknownledge
+	private noAck = false; // Allow Negative Acknownledge
 
-	constructor(readonly configService: ConfigService, Nack = false) {
+	constructor(readonly configService: ConfigService, noAck = false) {
 		super();
 		this.configOptions = {
 			host: configService.get<string>('ACTIVEMQ_HOST'),
@@ -28,7 +39,7 @@ export class ActiveMQServer extends Server implements CustomTransportStrategy {
 				'heart-beat': configService.get<string>('ACTIVEMQ_CONNECT_HEADER_HEARTBEAT')
 			}
 		};
-		this.Nack = Nack;
+		this.noAck = noAck;
 	}
 	transportId?: symbol | Transport;
 
@@ -39,29 +50,28 @@ export class ActiveMQServer extends Server implements CustomTransportStrategy {
 		this.start(callback);
 	}
 
-	async start(callback: () => void): Promise<void> {
-		if (this.channel) {
-			callback();
-			return;
-		}
+	public async start(cb: () => void) {
+		this.server = this.createClient();
+		this.server.on(CONNECT_EVENT, async () => {
+			if (this.channel) return cb();
+			this.channel = await this.createChannel();
+			this.activeMQBase = new ActiveMQBase(this.channel, this.noAck);
+			this.subscribeEvents();
+			this.healthCheck();
+			cb();
+		});
+		this.handleActiveMQEvents();
+	}
 
-		const createRes: any = await this.createClient();
+	createClient(): stompit.Client {
+		return stompit.connect(this.configOptions);
+	}
 
-		console.log(createRes);
-
-		this.channel = createRes.channel;
-
-		this.activeMQBase = new ActiveMQBase(this.channel, this.Nack);
-
+	subscribeEvents() {
 		const events = this.messageHandlers.keys();
 		let event = events.next();
-
 		while (event.value) {
 			const eventValue = event.value.toUpperCase();
-
-			Logger.verbose(this.queuePatternArr, 'ActiveMQ Server');
-			Logger.verbose(eventValue, 'ActiveMQ Server');
-
 			const destinationPattern = this.queuePatternArr.includes(eventValue)
 				? `/queue/${eventValue}`
 				: `/topic/${eventValue}`;
@@ -69,15 +79,32 @@ export class ActiveMQServer extends Server implements CustomTransportStrategy {
 			this.activeMQBase.subscribe(destinationPattern, this.getHandlerByPattern(event.value));
 			event = events.next();
 		}
+	}
 
+	healthCheck() {
 		clearInterval(this.heartBeatInvertal);
 		this.heartBeatInvertal = setInterval(() => {
 			this.heartBeat();
 		}, 30000);
-		callback();
 	}
 
-	createClient(): Promise<any> {
+	handleActiveMQEvents() {
+		this.server.on(CONNECT_FAILED_EVENT, (err) => {
+			this.logger.error(CONNECT_FAILED_ACTIVEMQ_MESSAGE);
+			this.logger.error(err);
+		});
+		this.server.on(DISCONNECT_EVENT, (err) => {
+			this.logger.error(DISCONNECTED_ACTIVEMQ_MESSAGE);
+			this.logger.error(err);
+			this.close();
+		});
+		this.server.on(ERROR_EVENT, (err) => {
+			this.logger.error(ERROR_ACTIVEMQ_MESSAGE);
+			this.logger.error(err);
+		});
+	}
+
+	private async createChannel(): Promise<stompit.Channel> {
 		// eslint-disable-next-line no-async-promise-executor
 		return new Promise(async (resolve, reject) => {
 			try {
@@ -88,7 +115,7 @@ export class ActiveMQServer extends Server implements CustomTransportStrategy {
 				}
 
 				const channel = new stompit.Channel(this.manager);
-				resolve({ channel });
+				resolve(channel);
 			} catch (err) {
 				reject(err);
 			}
@@ -100,27 +127,13 @@ export class ActiveMQServer extends Server implements CustomTransportStrategy {
 			if (!this.manager) this.manager = ActiveMQBase.getManager();
 			if (this.manager) return this.manager;
 
-			const connectOptions = (await this.getConfig()) as any;
-
-			this.manager = new stompit.ConnectFailover([connectOptions]);
-
+			this.manager = new stompit.ConnectFailover([this.configOptions]);
 			ActiveMQBase.setManager(this.manager);
-			Logger.log('New Manager', 'ActiveMQ Server');
 			return this.manager;
 		} catch (err) {
-			Logger.error(err && err.message, '', 'Create Manager');
+			this.logger.error(err && err.message, '', 'Create Manager');
 			throw new BadRequestException(err.message, err.status);
 		}
-	}
-
-	getConfig(): Promise<ConfigOptions> {
-		return new Promise((resolve, reject) => {
-			try {
-				resolve(this.configOptions);
-			} catch (error) {
-				reject(error);
-			}
-		});
 	}
 
 	/**
@@ -131,10 +144,10 @@ export class ActiveMQServer extends Server implements CustomTransportStrategy {
 			if (this.channel) {
 				this.channel.close(null);
 				this.channel = null;
-				Logger.warn('Close', 'Server ActiveMQ');
+				this.logger.warn('Close');
 			}
 		} catch (err) {
-			Logger.error(err && err.message, 'Close', 'Server ActiveMQ');
+			this.logger.error(err && err.message);
 		}
 	}
 
@@ -165,9 +178,9 @@ export class ActiveMQServer extends Server implements CustomTransportStrategy {
 			//       // Heartbeat Callback
 			//     }
 			//   );
-			Logger.log('Ping', 'ActiveMQ Server');
+			// this.logger.log('Ping');
 		} catch (err) {
-			Logger.error(err && err.message, 'Heart Beat', 'Server ActiveMQ');
+			this.logger.error(err && err.message, 'Heart Beat', 'Server ActiveMQ');
 		}
 	}
 

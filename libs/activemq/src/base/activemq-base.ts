@@ -8,11 +8,11 @@ export class ActiveMQBase {
 	static client: stompit.Client | null = null;
 	static manager: stompit.ConnectFailover | null = null;
 	static enableDebug = false;
-	private Nack = false; // Allow Negative Acknownledge
+	private noAck = false; // Allow Negative Acknownledge
 
-	constructor(channel, Nack = false) {
+	constructor(channel, noAck = false) {
 		this.channel = channel;
-		this.Nack = Nack;
+		this.noAck = noAck;
 		ActiveMQBase.syncChannel = channel;
 	}
 
@@ -41,9 +41,9 @@ export class ActiveMQBase {
 
 								const jsonData = JSON.parse(body);
 
-								callback && callback({ message, body: jsonData });
+								callback && callback({ message, destination, body: jsonData });
 
-								this.Nack && this.channel.ack(message);
+								this.noAck && this.channel.ack(message);
 							})
 						);
 					} catch (readErr) {

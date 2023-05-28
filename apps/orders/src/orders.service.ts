@@ -2,7 +2,6 @@ import { QUEUE_DESTINATION } from '@app/activemq';
 import { ActiveMQClient } from '@app/activemq/clients/activemq-client';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Timeout } from '@nestjs/schedule';
 import { Order } from './entity/order.entity';
 
 @Injectable()
@@ -10,11 +9,10 @@ export class OrdersService {
 	private readonly logger = new Logger(OrdersService.name);
 	private queue: ActiveMQClient | null = null;
 
-	constructor(private readonly configService: ConfigService) {
+	constructor(readonly configService: ConfigService) {
 		this.queue = new ActiveMQClient(configService);
 	}
 
-	@Timeout(Date.now().toString(), 500)
 	getHello(): string {
 		this.logger.log('Publish message');
 		const order: Order = {
@@ -27,13 +25,8 @@ export class OrdersService {
 		// this.queue.publish({ pattern: QUEUE_DESTINATION.FRONTEND_DESTINATION, data: order });
 		// 	.subscribe(() => console.log('pke'));
 
-		this.queue.publish({
-			pattern: QUEUE_DESTINATION.BACKEND_DESTINATION,
-			data: {
-				event: `message ${Date.now()}`,
-				data: 'hello backend',
-				type: 'queue'
-			}
+		this.queue.send(QUEUE_DESTINATION.ORDER_CREATED_DESTINATION, [1, 2, 3, 4, 5]).subscribe((res) => {
+			console.log(29, res);
 		});
 
 		// this.queue.publish({

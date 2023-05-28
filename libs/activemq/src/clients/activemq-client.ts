@@ -8,10 +8,12 @@ import { ConfigOptions } from '../types/config-options';
 
 @Injectable()
 export class ActiveMQClient extends ClientProxy {
+	private readonly logger = new Logger(ActiveMQClient.name);
 	private client: any = null;
 	channel: stompit.Channel | null = null;
 	private manager: stompit.ConnectFailover | null = null;
 	public activeMQBase: ActiveMQBase = null;
+	protected connection: Promise<any>;
 	maxReconnect = 5;
 	countReconnect = 0;
 	isError = false;
@@ -33,7 +35,34 @@ export class ActiveMQClient extends ClientProxy {
 		};
 	}
 
-	async connect(): Promise<any> {
+	public async start(): Promise<any> {
+		if (!this.isError && this.client) return;
+		try {
+			this.client;
+			this.client = this.createClient();
+			const createRes: any = await Promise.race([
+				this.createClient(),
+				new Promise((resolve) => setTimeout(resolve, 5000, false))
+			]);
+			if (!createRes) {
+				return this.logger.warn('Connect Timeout');
+			}
+			this.client.startAt = Date.now();
+			this.healthCheck();
+			return this.client;
+		} catch (error) {
+			this.logger.error(error && error.message);
+		}
+	}
+
+	healthCheck() {
+		clearInterval(this.heartBeatInvertal);
+		this.heartBeatInvertal = setInterval(() => {
+			this.heartBeat();
+		}, 30000);
+	}
+
+	public async connect(): Promise<any> {
 		try {
 			const fvTimer = TimerService.start();
 			let startClient: any = await this.start();
@@ -50,43 +79,43 @@ export class ActiveMQClient extends ClientProxy {
 		}
 	}
 
-	start() {
-		// eslint-disable-next-line no-async-promise-executor
-		return new Promise(async (resolve, reject) => {
-			try {
-				if (!this.isError && this.client) {
-					Logger.log('Start ActiveMQ Client', 'Client ActiveMQ');
-					return resolve(this.client);
-				}
+	// start() {
+	// 	// eslint-disable-next-line no-async-promise-executor
+	// 	return new Promise(async (resolve, reject) => {
+	// 		try {
+	// 			if (!this.isError && this.client) {
+	// 				Logger.log('Start ActiveMQ Client', 'Client ActiveMQ');
+	// 				return resolve(this.client);
+	// 			}
 
-				Logger.log('Start Func', 'Client ActiveMQ');
+	// 			Logger.log('Start Func', 'Client ActiveMQ');
 
-				const createRes: any = await Promise.race([
-					this.createClient(),
-					new Promise((resolve) => setTimeout(resolve, 5000, false))
-				]);
+	// 			const createRes: any = await Promise.race([
+	// 				this.createClient(),
+	// 				new Promise((resolve) => setTimeout(resolve, 5000, false))
+	// 			]);
 
-				if (!createRes) {
-					Logger.warn('Connect Timeout', 'Client ActiveMQ');
-					return;
-				}
+	// 			if (!createRes) {
+	// 				Logger.warn('Connect Timeout', 'Client ActiveMQ');
+	// 				return;
+	// 			}
 
-				Logger.log('Create Client', 'Client ActiveMQ');
+	// 			Logger.log('Create Client', 'Client ActiveMQ');
 
-				this.client.start_at = Date.now();
+	// 			this.client.start_at = Date.now();
 
-				clearInterval(this.heartBeatInvertal);
-				this.heartBeatInvertal = setInterval(() => {
-					if (this.countReconnect > 0) return;
-					this.heartBeat();
-				}, 30000);
+	// 			clearInterval(this.heartBeatInvertal);
+	// 			this.heartBeatInvertal = setInterval(() => {
+	// 				if (this.countReconnect > 0) return;
+	// 				this.heartBeat();
+	// 			}, 30000);
 
-				resolve(this.client);
-			} catch (err) {
-				Logger.error(err.message, 'Client ActiveMQ Connect');
-			}
-		});
-	}
+	// 			resolve(this.client);
+	// 		} catch (err) {
+	// 			Logger.error(err.message, 'Client ActiveMQ Connect');
+	// 		}
+	// 	});
+	// }
 
 	createClient() {
 		// eslint-disable-next-line no-async-promise-executor
