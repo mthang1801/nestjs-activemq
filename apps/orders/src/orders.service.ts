@@ -1,4 +1,4 @@
-import { QUEUE_DESTINATION } from '@app/activemq';
+import { QUEUE_DESTINATION, TOPIC_DESTINATION } from '@app/activemq';
 import { ActiveMQClient } from '@app/activemq/clients/activemq-client';
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -29,14 +29,14 @@ export class OrdersService {
 			console.log(29, res);
 		});
 
-		// this.queue.publish({
-		// 	pattern: TOPIC_DESTINATION.DEVELOPER,
-		// 	data: {
-		// 		event: `message ${Date.now()}`,
-		// 		data: 'hello',
-		// 		type: 'topic'
-		// 	}
-		// });
+		this.queue.publish({
+			pattern: TOPIC_DESTINATION.DEVELOPER,
+			data: {
+				event: `message ${Date.now()}`,
+				data: 'hello',
+				type: 'topic'
+			}
+		});
 
 		return 'Hello World!';
 	}

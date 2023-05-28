@@ -3,15 +3,23 @@ import { ConfigService } from '@nestjs/config';
 import { ClientProxy, ReadPacket, WritePacket } from '@nestjs/microservices';
 import * as stompit from 'stompit';
 import { ActiveMQBase } from '../base/activemq-base';
+import {
+  CONNECT_FAILED_ACTIVEMQ_MESSAGE,
+  CONNECT_FAILED_EVENT,
+  DISCONNECTED_ACTIVEMQ_MESSAGE,
+  DISCONNECT_EVENT,
+  ERROR_ACTIVEMQ_MESSAGE,
+  ERROR_EVENT
+} from '../constants/constants';
 import { TimerService } from '../timer';
 import { ConfigOptions } from '../types/config-options';
 
 @Injectable()
 export class ActiveMQClient extends ClientProxy {
-	private readonly logger = new Logger(ActiveMQClient.name);
-	private client: any = null;
+	protected readonly logger = new Logger(ActiveMQClient.name);
+	protected client: any = null;
 	channel: stompit.Channel | null = null;
-	private manager: stompit.ConnectFailover | null = null;
+	protected manager: stompit.ConnectFailover | null = null;
 	public activeMQBase: ActiveMQBase = null;
 	protected connection: Promise<any>;
 	maxReconnect = 5;
@@ -38,17 +46,15 @@ export class ActiveMQClient extends ClientProxy {
 	public async start(): Promise<any> {
 		if (!this.isError && this.client) return;
 		try {
-			this.client;
-			this.client = this.createClient();
-			const createRes: any = await Promise.race([
+			const response: any = await Promise.race([
 				this.createClient(),
 				new Promise((resolve) => setTimeout(resolve, 5000, false))
 			]);
-			if (!createRes) {
+			if (!response) {
 				return this.logger.warn('Connect Timeout');
 			}
-			this.client.startAt = Date.now();
 			this.healthCheck();
+			this.handleActiveMQEvents();
 			return this.client;
 		} catch (error) {
 			this.logger.error(error && error.message);
@@ -64,69 +70,27 @@ export class ActiveMQClient extends ClientProxy {
 
 	public async connect(): Promise<any> {
 		try {
-			const fvTimer = TimerService.start();
-			let startClient: any = await this.start();
-			const fvDuration = TimerService.duration(fvTimer, `Client ActiveMQ`);
+			const timer = TimerService.start();
+			const client: any = await this.start();
+			const duration = TimerService.duration(timer, `Client ActiveMQ`);
 
-			if (fvDuration < 10000) return startClient;
+			if (duration < 10000) return client;
 			this.close();
 
-			startClient = await this.start();
-			return startClient;
+			return await this.start();
 		} catch (err) {
 			Logger.error(err.message, 'Client ActiveMQ Connect');
 			throw new BadRequestException(err.message, err.status);
 		}
 	}
 
-	// start() {
-	// 	// eslint-disable-next-line no-async-promise-executor
-	// 	return new Promise(async (resolve, reject) => {
-	// 		try {
-	// 			if (!this.isError && this.client) {
-	// 				Logger.log('Start ActiveMQ Client', 'Client ActiveMQ');
-	// 				return resolve(this.client);
-	// 			}
-
-	// 			Logger.log('Start Func', 'Client ActiveMQ');
-
-	// 			const createRes: any = await Promise.race([
-	// 				this.createClient(),
-	// 				new Promise((resolve) => setTimeout(resolve, 5000, false))
-	// 			]);
-
-	// 			if (!createRes) {
-	// 				Logger.warn('Connect Timeout', 'Client ActiveMQ');
-	// 				return;
-	// 			}
-
-	// 			Logger.log('Create Client', 'Client ActiveMQ');
-
-	// 			this.client.start_at = Date.now();
-
-	// 			clearInterval(this.heartBeatInvertal);
-	// 			this.heartBeatInvertal = setInterval(() => {
-	// 				if (this.countReconnect > 0) return;
-	// 				this.heartBeat();
-	// 			}, 30000);
-
-	// 			resolve(this.client);
-	// 		} catch (err) {
-	// 			Logger.error(err.message, 'Client ActiveMQ Connect');
-	// 		}
-	// 	});
-	// }
-
-	createClient() {
+	async createClient(): Promise<{ client: stompit.Channel; channel: stompit.Channel }> {
 		// eslint-disable-next-line no-async-promise-executor
 		return new Promise(async (resolve, reject) => {
 			try {
 				await this.createManager();
-
 				const channel = ActiveMQBase.getSyncChannel();
-
 				this.client = channel;
-
 				resolve({ client: channel, channel });
 			} catch (err) {
 				Logger.error(err.message, 'Client ActiveMQ createClient');
@@ -186,7 +150,6 @@ export class ActiveMQClient extends ClientProxy {
 				(async () => {
 					this.countReconnect++;
 					if (this.countReconnect > 1) return;
-					TimerService.sendToTelegram(`ActiveMQ Send createClient`);
 					await this.createClient();
 
 					this.client.send(sendHeaders, JSON.stringify(packet.data), () => {
@@ -198,9 +161,9 @@ export class ActiveMQClient extends ClientProxy {
 				})();
 			}
 
-			return () => Logger.log('teardown', 'Client ActiveMQ');
+			return () => this.logger.log('teardown');
 		} catch (err) {
-			Logger.error(err, '', 'ActiveMQ Send Error');
+			this.logger.error(err && err.message);
 		}
 	}
 
@@ -214,20 +177,20 @@ export class ActiveMQClient extends ClientProxy {
 		});
 	}
 
-	handleControl(data) {
-		if (!data || !Object.keys(data).length) return;
-
-		if (data.cmd === 'ENABLE_DEBUG') {
-			ActiveMQBase.enableDebugHandler();
-		}
-
-		if (data.cmd === 'DISABLE_DEBUG') {
-			ActiveMQBase.disableDebugHandler();
-		}
-
-		if (data.cmd === 'DEBUG_STATUS') {
-			ActiveMQBase.getDebugStatus();
-		}
+	handleActiveMQEvents() {
+		this.client.on(CONNECT_FAILED_EVENT, (err) => {
+			this.logger.error(CONNECT_FAILED_ACTIVEMQ_MESSAGE);
+			this.logger.error(err);
+		});
+		this.client.on(DISCONNECT_EVENT, (err) => {
+			this.logger.error(DISCONNECTED_ACTIVEMQ_MESSAGE);
+			this.logger.error(err);
+			this.close();
+		});
+		this.client.on(ERROR_EVENT, (err) => {
+			this.logger.error(ERROR_ACTIVEMQ_MESSAGE);
+			this.logger.error(err);
+		});
 	}
 
 	heartBeat() {

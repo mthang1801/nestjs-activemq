@@ -1,4 +1,5 @@
 export const ACTIVEMQ_OPTIONS = 'ACTIVEMQ_OPTIONS';
+export const ACTIVEMQ_TOKEN = 'ACTIVEMQ_TOKEN';
 export const ACTIVEMQ_SERVICES = {
 	ORDER: 'ORDER'
 };
