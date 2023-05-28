@@ -7,11 +7,8 @@ import { Order } from './entity/order.entity';
 @Injectable()
 export class OrdersService {
 	private readonly logger = new Logger(OrdersService.name);
-	private queue: ActiveMQClient | null = null;
 
-	constructor(readonly configService: ConfigService) {
-		this.queue = new ActiveMQClient(configService);
-	}
+	constructor(readonly configService: ConfigService, private readonly activeMQClient: ActiveMQClient) {}
 
 	getHello(): string {
 		this.logger.log('Publish message');
@@ -25,11 +22,11 @@ export class OrdersService {
 		// this.queue.publish({ pattern: QUEUE_DESTINATION.FRONTEND_DESTINATION, data: order });
 		// 	.subscribe(() => console.log('pke'));
 
-		this.queue.send(QUEUE_DESTINATION.ORDER_CREATED_DESTINATION, [1, 2, 3, 4, 5]).subscribe((res) => {
+		this.activeMQClient.send(QUEUE_DESTINATION.ORDER_CREATED_DESTINATION, [1, 2, 3, 4, 5]).subscribe((res) => {
 			console.log(29, res);
 		});
 
-		this.queue.publish({
+		this.activeMQClient.publish({
 			pattern: TOPIC_DESTINATION.DEVELOPER,
 			data: {
 				event: `message ${Date.now()}`,

@@ -5,6 +5,14 @@ services:
     ports:
       - 61613:61613
       - 8161:8161
+  
+  mongodb: 
+    image: mongodb
+    ports: 
+      - "27017:27017"
+    environment:
+      - MONGODB_DEFAULT_USER=root
+      - MONGODB_DEFAULT_PASS=admin123
 
 volumes:
   activemq-data: {}
